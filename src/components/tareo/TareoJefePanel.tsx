@@ -1,6 +1,6 @@
 import React, { useState, useEffect, useCallback } from "react";
 import { fetchTareosPorMes, type TareoAnalistaResumen, mandarARevision } from "../../lib/tareoAnalista";
-import { consolidarTareoMaestro, todosLosTareosCerrados } from "../../lib/tareoMaestro";
+import { consolidarTareoMaestro, todosLosTareosCerrados, reabrirTareoMaestro } from "../../lib/tareoMaestro";
 import { supabase } from "../../lib/supabase";
 import { MESES } from "../../lib/supabase";
 
@@ -25,7 +25,8 @@ export default function TareoJefePanel({ anioInicial, mesInicial }: Props) {
             const raw = window.sessionStorage.getItem("pt_periodo");
             if (raw) {
                 try {
-                    return JSON.parse(raw).anio;
+                    const parsed = JSON.parse(raw).anio;
+                    if (parsed && !isNaN(parsed)) return parsed;
                 } catch (e) { }
             }
         }
@@ -36,28 +37,25 @@ export default function TareoJefePanel({ anioInicial, mesInicial }: Props) {
             const raw = window.sessionStorage.getItem("pt_periodo");
             if (raw) {
                 try {
-                    return JSON.parse(raw).mes;
+                    const parsed = JSON.parse(raw).mes;
+                    if (parsed && !isNaN(parsed)) return parsed;
                 } catch (e) { }
             }
         }
         return mesInicial;
     });
 
-    // Escuchar cambios del global selector
+    // Escuchar cambios del global selector (CustomEvent)
     useEffect(() => {
         if (typeof window === "undefined") return;
-        const onStorageChange = () => {
-            const raw = window.sessionStorage.getItem("pt_periodo");
-            if (raw) {
-                try {
-                    const pe = JSON.parse(raw);
-                    if (pe.anio !== anio) setAnio(pe.anio);
-                    if (pe.mes !== mes) setMes(pe.mes);
-                } catch (e) { }
-            }
+        const onPeriodoChange = (e: Event) => {
+            const customEvent = e as CustomEvent;
+            const pe = customEvent.detail;
+            if (pe.anio !== anio) setAnio(pe.anio);
+            if (pe.mes !== mes) setMes(pe.mes);
         };
-        const interval = setInterval(onStorageChange, 500);
-        return () => clearInterval(interval);
+        window.addEventListener("pt:periodo-changed", onPeriodoChange);
+        return () => window.removeEventListener("pt:periodo-changed", onPeriodoChange);
     }, [anio, mes]);
 
     const mesLabel = `${MESES[mes]} ${anio}`;
@@ -80,6 +78,10 @@ export default function TareoJefePanel({ anioInicial, mesInicial }: Props) {
     const [revisionObs, setRevisionObs] = useState("");
     const [enviandoRevision, setEnviandoRevision] = useState(false);
     const [revisionError, setRevisionError] = useState<string | null>(null);
+
+    // ── Reabrir modal ─────────────────────────────────────────────────────────
+    const [showConfirmReabrir, setShowConfirmReabrir] = useState(false);
+    const [reabriendo, setReabriendo] = useState(false);
 
     const ANIOS = Array.from({ length: 5 }, (_, i) => new Date().getFullYear() - 1 + i);
     const MESES_LIST = Array.from({ length: 12 }, (_, i) => i + 1);
@@ -159,6 +161,21 @@ export default function TareoJefePanel({ anioInicial, mesInicial }: Props) {
         setShowConfirm(false);
     }, [anio, mes, mesLabel]);
 
+    // ── Reabrir ──────────────────────────────────────────────────────────────
+    const ejecutarReabrir = useCallback(async () => {
+        setReabriendo(true);
+        setMsgError(null);
+        const result = await reabrirTareoMaestro(anio, mes);
+        if (result.ok) {
+            setMaestroConcretado(false);
+            setMsgOk(`Tareo de ${mesLabel} ha sido reabierto.`);
+        } else {
+            setMsgError(result.error ?? "Error al reabrir el tareo.");
+        }
+        setReabriendo(false);
+        setShowConfirmReabrir(false);
+    }, [anio, mes, mesLabel]);
+
     // ── Mandar a revisión ─────────────────────────────────────────────────────
     const ejecutarRevision = useCallback(async () => {
         if (!revisionTareoId || !revisionObs.trim()) {
@@ -196,10 +213,20 @@ export default function TareoJefePanel({ anioInicial, mesInicial }: Props) {
                 </div>
                 <div style={{ display: "flex", gap: "8px", alignItems: "center" }}>
                     {maestroConcretado && (
-                        <a href={`/tareo/maestro`}
-                            className="btn btn--primary" style={{ marginLeft: "8px" }}>
-                            Ver Tareo Maestro →
-                        </a>
+                        <>
+                            <button
+                                className="btn btn--ghost"
+                                style={{ marginLeft: "8px" }}
+                                onClick={() => setShowConfirmReabrir(true)}
+                                title="Reabrir periodo para recibir correcciones"
+                            >
+                                ↩ Reabrir
+                            </button>
+                            <a href={`/tareo/maestro`}
+                                className="btn btn--primary" style={{ marginLeft: "8px" }}>
+                                Ver Tareo Maestro →
+                            </a>
+                        </>
                     )}
                 </div>
             </div>
@@ -394,7 +421,7 @@ export default function TareoJefePanel({ anioInicial, mesInicial }: Props) {
                             Esta acción consolidará los datos de <strong>{estadoMaestro?.totalAnalistas} analistas</strong> en el Tareo Maestro.
                         </p>
                         <p style={{ color: "var(--color-text-muted)", fontSize: "13px", marginBottom: "24px" }}>
-                            El tareo maestro quedará <strong>concretado</strong> y no podrá modificarse.
+                            El tareo maestro quedará <strong>concretado</strong> y no podrá modificarse hasta que lo reabras.
                         </p>
                         <div style={{ display: "flex", gap: "10px", justifyContent: "center" }}>
                             <button className="btn btn--ghost" onClick={() => setShowConfirm(false)} disabled={concretando}>
@@ -402,6 +429,33 @@ export default function TareoJefePanel({ anioInicial, mesInicial }: Props) {
                             </button>
                             <button className="btn btn--primary" onClick={ejecutarConcretar} disabled={concretando}>
                                 {concretando ? "Concretando..." : "Sí, concretar tareo"}
+                            </button>
+                        </div>
+                    </div>
+                </div>
+            )}
+
+            {/* Modal confirmación reabrir */}
+            {showConfirmReabrir && (
+                <div style={{
+                    position: "fixed", inset: 0, background: "rgba(0,0,0,0.65)",
+                    zIndex: 1000, display: "flex", alignItems: "center", justifyContent: "center",
+                }}>
+                    <div className="card" style={{ width: "460px", padding: "32px", textAlign: "center" }}>
+                        <div style={{ fontSize: "48px", marginBottom: "14px" }}>↩️</div>
+                        <h3 style={{ marginBottom: "10px" }}>¿Reabrir Tareo de {mesLabel}?</h3>
+                        <p style={{ color: "var(--color-text-muted)", fontSize: "13px", marginBottom: "8px" }}>
+                            El estado del Tareo Maestro volverá a <strong>Abierto</strong>.
+                        </p>
+                        <p style={{ color: "var(--color-text-muted)", fontSize: "13px", marginBottom: "24px" }}>
+                            Podrás volver a mandar a revisión los analistas y tendrás que concretar el mes nuevamente.
+                        </p>
+                        <div style={{ display: "flex", gap: "10px", justifyContent: "center" }}>
+                            <button className="btn btn--ghost" onClick={() => setShowConfirmReabrir(false)} disabled={reabriendo}>
+                                Cancelar
+                            </button>
+                            <button className="btn btn--primary" onClick={ejecutarReabrir} disabled={reabriendo}>
+                                {reabriendo ? "Reabriendo..." : "Sí, reabrir tareo"}
                             </button>
                         </div>
                     </div>

@@ -144,7 +144,10 @@ import Layout from "../../layouts/Layout.astro";
                 window.location.href = "/login";
                 return;
             }
-            if (user.rol !== "jefe") {
+            var isJefeOrCentral =
+                user.rol === "jefe" ||
+                (user.rol === "analista" && user.sede === "ADM. CENTRAL");
+            if (!isJefeOrCentral) {
                 window.location.href = "/";
                 return;
             }

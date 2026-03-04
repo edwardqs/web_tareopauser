@@ -68,7 +68,8 @@ export default function TareoAnalistaWrapper({ anio, mes, mesLabel, tareoAnalist
         try {
             const u = JSON.parse(raw) as SessionUser;
             // Guard: si es jefe y no trae el ID desde la URL o props → redirigir
-            if (u.rol !== "analista" && !finalId) {
+            const isJefeOrCentral = u.rol === "jefe" || (u.rol === "analista" && u.sede === "ADM. CENTRAL");
+            if (isJefeOrCentral && !finalId && u.rol === "jefe") {
                 window.location.href = "/";
                 return;
             }

@@ -301,6 +301,7 @@ export async function fetchTareosPorMes(
     mes: number
 ): Promise<TareoAnalistaResumen[]> {
     if (!supabase) return [];
+    if (!anio || !mes || isNaN(anio) || isNaN(mes)) return [];
 
     const { data, error } = await supabase
         .from("tareos_analista")

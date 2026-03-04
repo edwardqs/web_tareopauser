@@ -26,6 +26,7 @@ import { exportarPDF, exportarExcel, construirFilas, type FilaRaw } from "../../
 type SessionUser = {
     id: string;
     nombre: string;
+    sede?: string;
     rol: "jefe" | "analista";
 };
 
@@ -40,7 +41,8 @@ export default function TareoMaestroWrapper() {
             const raw = window.sessionStorage.getItem("pt_periodo");
             if (raw) {
                 try {
-                    return JSON.parse(raw).anio;
+                    const parsed = JSON.parse(raw).anio;
+                    if (parsed && !isNaN(parsed)) return parsed;
                 } catch (e) { }
             }
         }
@@ -52,7 +54,8 @@ export default function TareoMaestroWrapper() {
             const raw = window.sessionStorage.getItem("pt_periodo");
             if (raw) {
                 try {
-                    return JSON.parse(raw).mes;
+                    const parsed = JSON.parse(raw).mes;
+                    if (parsed && !isNaN(parsed)) return parsed;
                 } catch (e) { }
             }
         }
@@ -62,19 +65,14 @@ export default function TareoMaestroWrapper() {
     // Escuchar cambios de sessionStorage (del global selector) para actualizar vista si estamos en la ruta correcta
     useEffect(() => {
         if (!isClient) return;
-        const onStorageChange = () => {
-            const raw = window.sessionStorage.getItem("pt_periodo");
-            if (raw) {
-                try {
-                    const pe = JSON.parse(raw);
-                    if (pe.anio !== anio) setAnio(pe.anio);
-                    if (pe.mes !== mes) setMes(pe.mes);
-                } catch (e) { }
-            }
+        const onPeriodoChange = (e: Event) => {
+            const customEvent = e as CustomEvent;
+            const pe = customEvent.detail;
+            if (pe.anio !== anio) setAnio(pe.anio);
+            if (pe.mes !== mes) setMes(pe.mes);
         };
-        // Polling para detectar cambios hechos por Layout (porque storage event no dispara en la misma tab)
-        const interval = setInterval(onStorageChange, 500);
-        return () => clearInterval(interval);
+        window.addEventListener("pt:periodo-changed", onPeriodoChange);
+        return () => window.removeEventListener("pt:periodo-changed", onPeriodoChange);
     }, [anio, mes, isClient]);
 
     // Update URL when changed so refreshing keeps the month
@@ -102,7 +100,8 @@ export default function TareoMaestroWrapper() {
         if (!raw) { window.location.href = "/login"; return; }
         try {
             const u = JSON.parse(raw) as SessionUser;
-            if (u.rol !== "jefe") { window.location.href = "/"; return; }
+            const isJefeOrCentral = u.rol === "jefe" || (u.rol === "analista" && u.sede === "ADM. CENTRAL");
+            if (!isJefeOrCentral) { window.location.href = "/"; return; }
             setAuthChecked(true);
         } catch { window.location.href = "/login"; }
     }, []);

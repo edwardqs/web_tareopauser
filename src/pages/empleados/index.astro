@@ -346,16 +346,28 @@ const sbKey = import.meta.env.PUBLIC_SUPABASE_ANON_KEY ?? "";
         }
         loadEl.textContent = "Cargando...";
 
+        const rawAuth = window.sessionStorage.getItem("pt_auth");
+        let sedeFiltro = "";
+        if (rawAuth) {
+            try {
+                const u = JSON.parse(rawAuth);
+                // Si es analista y NO es de ADM. CENTRAL, filtramos por su sede
+                if (u.rol === "analista" && u.sede !== "ADM. CENTRAL") {
+                    sedeFiltro = `&sede=eq.${encodeURIComponent(u.sede)}`;
+                }
+            } catch (e) {}
+        }
+
         const F =
             "id,dni,full_name,position,sede,business_unit,entry_date," +
             "is_active,termination_date,termination_reason,created_at,updated_at";
 
         const [activos, bajas, cfgs] = await Promise.all([
             sbGet(
-                `employees?is_active=eq.true&termination_date=is.null&select=${F}&order=full_name`,
+                `employees?is_active=eq.true&termination_date=is.null&select=${F}&order=full_name${sedeFiltro}`,
             ),
             sbGet(
-                `employees?is_active=eq.false&termination_date=gte.${FECHA_MES.slice(0, 10)}&select=${F}&order=termination_date.desc`,
+                `employees?is_active=eq.false&termination_date=gte.${FECHA_MES.slice(0, 10)}&select=${F}&order=termination_date.desc${sedeFiltro}`,
             ),
             sbGet("tareo_employee_config?select=*"),
         ]);

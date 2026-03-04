@@ -324,9 +324,20 @@ const currentPath = Astro.url.pathname;
 						);
 					}
 
-					// Set UI selectors
+					// Set UI selectors + Generar años dinámicamente
 					var gMes = document.getElementById("global-mes");
 					var gAnio = document.getElementById("global-anio");
+
+					if (gAnio) {
+						var dAnio = new Date().getFullYear();
+						var htmlAnios = "";
+						for (var i = dAnio - 1; i <= dAnio + 3; i++) {
+							htmlAnios +=
+								'<option value="' + i + '">' + i + "</option>";
+						}
+						gAnio.innerHTML = htmlAnios;
+					}
+
 					if (gMes) gMes.value = String(pMes);
 					if (gAnio) gAnio.value = String(pAnio);
 
@@ -340,6 +351,12 @@ const currentPath = Astro.url.pathname;
 						window.sessionStorage.setItem(
 							"pt_periodo",
 							JSON.stringify(nuevoPe),
+						);
+						// Mejora 7: Emitir CustomEvent para que React escuche sin polling
+						window.dispatchEvent(
+							new CustomEvent("pt:periodo-changed", {
+								detail: nuevoPe,
+							}),
 						);
 						// Si estamos en una ruta de tareo específico por año/mes, cambiar la URL
 						var pathParts = window.location.pathname.split("/");
@@ -362,7 +379,22 @@ const currentPath = Astro.url.pathname;
 						gAnio.addEventListener("change", onPeriodoChange);
 
 					var anioMesParam = "?anio=" + pAnio + "&mes=" + pMes;
-					if (user.rol === "jefe") {
+					var isJefeOrCentral =
+						user.rol === "jefe" ||
+						(user.rol === "analista" &&
+							user.sede === "ADM. CENTRAL");
+
+					if (isJefeOrCentral) {
+						var enlacesJefe = "";
+						if (user.rol === "jefe") {
+							enlacesJefe = nl(
+								"/usuarios",
+								svgKey,
+								"Usuarios",
+								null,
+							);
+						}
+
 						nav.innerHTML =
 							nl("/", svgGrid, "Dashboard", null) +
 							'<div style="margin-top:6px; margin-bottom:6px;">' +
@@ -376,6 +408,15 @@ const currentPath = Astro.url.pathname;
 								null,
 								true,
 							) +
+							(user.rol === "analista"
+								? nl(
+										"/tareo/analista",
+										"",
+										"Mi Tareo",
+										"badge-en-revision",
+										true,
+									)
+								: "") +
 							"</div>" +
 							"</div>" +
 							nl(
@@ -385,14 +426,20 @@ const currentPath = Astro.url.pathname;
 								"badge-trabajadores",
 							) +
 							nl("/afp", svgPct, "Tasas AFP", null) +
-							nl("/usuarios", svgKey, "Usuarios", null);
+							enlacesJefe;
 					} else {
 						nav.innerHTML =
 							nl("/", svgGrid, "Dashboard", null) +
 							'<div style="margin-top:6px; margin-bottom:6px;">' +
 							nl("/tareo", svgLayrs, "TAREO", null) +
 							'<div class="nav-submenu">' +
-							nl("/tareo/analista", "", "Mi Tareo", null, true) +
+							nl(
+								"/tareo/analista",
+								"",
+								"Mi Tareo",
+								"badge-en-revision",
+								true,
+							) +
 							"</div>" +
 							"</div>" +
 							nl(
@@ -454,7 +501,7 @@ const currentPath = Astro.url.pathname;
 			})();
 		</script>
 
-		<!-- ── Badge de empleados sin config tareo ── -->
+		<!-- ── Badge de empleados sin config tareo (JEFE) + Badge obs (ANALISTA) ── -->
 		<script type="module">
 			async function actualizarBadge() {
 				var sbUrl = document.querySelector(
@@ -463,49 +510,68 @@ const currentPath = Astro.url.pathname;
 				var sbKey = document.querySelector(
 					'meta[name="sb-key"]',
 				)?.content;
-				var badge = document.getElementById("badge-trabajadores");
-				if (
-					!badge ||
-					!sbUrl ||
-					!sbKey ||
-					sbKey.startsWith("REEMPLAZAR")
-				)
-					return;
+				if (!sbUrl || !sbKey || sbKey.startsWith("REEMPLAZAR")) return;
+
+				var raw = window.sessionStorage.getItem("pt_auth");
+				if (!raw) return;
 				try {
-					var [r1, r2] = await Promise.all([
-						fetch(
+					var user = JSON.parse(raw);
+					var headers = {
+						apikey: sbKey,
+						Authorization: "Bearer " + sbKey,
+						Prefer: "count=exact",
+						Range: "0-0",
+					};
+
+					if (user.rol === "jefe") {
+						var badge =
+							document.getElementById("badge-trabajadores");
+						if (!badge) return;
+						var [r1, r2] = await Promise.all([
+							fetch(
+								sbUrl +
+									"/rest/v1/employees?is_active=eq.true&termination_date=is.null&select=id",
+								{ headers },
+							),
+							fetch(
+								sbUrl +
+									"/rest/v1/tareo_employee_config?select=id",
+								{ headers },
+							),
+						]);
+						var total = parseInt(
+							r1.headers.get("Content-Range")?.split("/")[1] ??
+								"0",
+						);
+						var conCfg = parseInt(
+							r2.headers.get("Content-Range")?.split("/")[1] ??
+								"0",
+						);
+						var sinCfg = Math.max(0, total - conCfg);
+						badge.textContent = sinCfg > 0 ? String(sinCfg) : "";
+						badge.style.display =
+							sinCfg > 0 ? "inline-block" : "none";
+					} else if (user.rol === "analista") {
+						// Mejora 9: Badge analista observaciones pendientes
+						var badgeObs =
+							document.getElementById("badge-en-revision");
+						if (!badgeObs) return;
+						// Filtrar tareos_analista por analista_id y estado = en_revision
+						var r3 = await fetch(
 							sbUrl +
-								"/rest/v1/employees?is_active=eq.true&termination_date=is.null&select=id",
-							{
-								headers: {
-									apikey: sbKey,
-									Authorization: "Bearer " + sbKey,
-									Prefer: "count=exact",
-									Range: "0-0",
-								},
-							},
-						),
-						fetch(
-							sbUrl + "/rest/v1/tareo_employee_config?select=id",
-							{
-								headers: {
-									apikey: sbKey,
-									Authorization: "Bearer " + sbKey,
-									Prefer: "count=exact",
-									Range: "0-0",
-								},
-							},
-						),
-					]);
-					var total = parseInt(
-						r1.headers.get("Content-Range")?.split("/")[1] ?? "0",
-					);
-					var conCfg = parseInt(
-						r2.headers.get("Content-Range")?.split("/")[1] ?? "0",
-					);
-					var sinCfg = Math.max(0, total - conCfg);
-					badge.textContent = sinCfg > 0 ? String(sinCfg) : "";
-					badge.style.display = sinCfg > 0 ? "inline-block" : "none";
+								"/rest/v1/tareos_analista?analista_id=eq." +
+								user.id +
+								"&estado=eq.en_revision&select=id",
+							{ headers },
+						);
+						var enRev = parseInt(
+							r3.headers.get("Content-Range")?.split("/")[1] ??
+								"0",
+						);
+						badgeObs.textContent = enRev > 0 ? String(enRev) : "";
+						badgeObs.style.display =
+							enRev > 0 ? "inline-block" : "none";
+					}
 				} catch {
 					/* silencioso */
 				}

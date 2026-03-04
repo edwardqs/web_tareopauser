@@ -25,7 +25,8 @@ export default function TareoJefeWrapper({ anioInicial, mesInicial }: Props) {
         if (!raw) { window.location.href = "/login"; return; }
         try {
             const u = JSON.parse(raw) as SessionUser;
-            if (u.rol !== "jefe") { window.location.href = "/"; return; }
+            const isJefeOrCentral = u.rol === "jefe" || (u.rol === "analista" && u.sede === "ADM. CENTRAL");
+            if (!isJefeOrCentral) { window.location.href = "/"; return; }
             setUser(u);
         } catch {
             window.location.href = "/login";
