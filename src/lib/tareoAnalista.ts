@@ -358,6 +358,43 @@ export async function fetchTareoAnalistaConDetalle(
     };
 }
 
+// ─── Audit log ────────────────────────────────────────────────────────────────
+
+export interface AuditLogEntry {
+    id: string;
+    tareo_analista_id: string;
+    empleado_id: string | null;
+    accion: string;
+    campo: string | null;
+    valor_anterior: string | null;
+    valor_nuevo: string | null;
+    created_at: string;
+}
+
+/**
+ * Trae las últimas N entradas del audit log para un tareo.
+ */
+export async function fetchAuditLog(
+    tareoAnalistaId: string,
+    limit = 60
+): Promise<AuditLogEntry[]> {
+    if (!supabase) return [];
+
+    const { data, error } = await supabase
+        .from("tareo_audit_log")
+        .select("*")
+        .eq("tareo_analista_id", tareoAnalistaId)
+        .order("created_at", { ascending: false })
+        .limit(limit);
+
+    if (error) {
+        console.error("[tareoAnalista] fetchAuditLog:", error.message);
+        return [];
+    }
+
+    return (data ?? []) as unknown as AuditLogEntry[];
+}
+
 // ─── Historial de tareos del analista ─────────────────────────────────────────
 
 /**

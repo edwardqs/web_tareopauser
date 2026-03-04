@@ -1,4 +1,6 @@
 import React, { useEffect, useState } from "react";
+import { useStore } from "@nanostores/react";
+import { $user } from "../../lib/stores";
 import { supabase, MESES } from "../../lib/supabase";
 import { fetchTareoMaestroLive } from "../../lib/tareoMaestro";
 import {
@@ -23,19 +25,13 @@ interface RecentTareoSummary {
 }
 
 export default function DashboardRecentTareos({ anioActual }: { anioActual: number }) {
+    const user = useStore($user);
+    const role = user?.rol ?? "analista";
+
     const [loaded, setLoaded] = useState(false);
     const [recentSumm, setRecentSumm] = useState<RecentTareoSummary[]>([]);
-    const [role, setRole] = useState("analista");
 
     useEffect(() => {
-        const raw = window.sessionStorage.getItem("pt_auth");
-        if (raw) {
-            try {
-                const u = JSON.parse(raw);
-                setRole(u.rol || "analista");
-            } catch { }
-        }
-
         async function loadData() {
             setLoaded(false);
             const currentMonth = new Date().getMonth() + 1;

@@ -1,4 +1,6 @@
 import React, { useState, useEffect, useCallback } from "react";
+import { useStore } from "@nanostores/react";
+import { $periodo } from "../../lib/stores";
 import { fetchTareosPorMes, type TareoAnalistaResumen, mandarARevision } from "../../lib/tareoAnalista";
 import { consolidarTareoMaestro, todosLosTareosCerrados, reabrirTareoMaestro } from "../../lib/tareoMaestro";
 import { supabase } from "../../lib/supabase";
@@ -20,43 +22,7 @@ function estadoBadge(estado: string) {
 }
 
 export default function TareoJefePanel({ anioInicial, mesInicial }: Props) {
-    const [anio, setAnio] = useState(() => {
-        if (typeof window !== "undefined") {
-            const raw = window.sessionStorage.getItem("pt_periodo");
-            if (raw) {
-                try {
-                    const parsed = JSON.parse(raw).anio;
-                    if (parsed && !isNaN(parsed)) return parsed;
-                } catch (e) { }
-            }
-        }
-        return anioInicial;
-    });
-    const [mes, setMes] = useState(() => {
-        if (typeof window !== "undefined") {
-            const raw = window.sessionStorage.getItem("pt_periodo");
-            if (raw) {
-                try {
-                    const parsed = JSON.parse(raw).mes;
-                    if (parsed && !isNaN(parsed)) return parsed;
-                } catch (e) { }
-            }
-        }
-        return mesInicial;
-    });
-
-    // Escuchar cambios del global selector (CustomEvent)
-    useEffect(() => {
-        if (typeof window === "undefined") return;
-        const onPeriodoChange = (e: Event) => {
-            const customEvent = e as CustomEvent;
-            const pe = customEvent.detail;
-            if (pe.anio !== anio) setAnio(pe.anio);
-            if (pe.mes !== mes) setMes(pe.mes);
-        };
-        window.addEventListener("pt:periodo-changed", onPeriodoChange);
-        return () => window.removeEventListener("pt:periodo-changed", onPeriodoChange);
-    }, [anio, mes]);
+    const { anio, mes } = useStore($periodo);
 
     const mesLabel = `${MESES[mes]} ${anio}`;
 
@@ -82,9 +48,6 @@ export default function TareoJefePanel({ anioInicial, mesInicial }: Props) {
     // ── Reabrir modal ─────────────────────────────────────────────────────────
     const [showConfirmReabrir, setShowConfirmReabrir] = useState(false);
     const [reabriendo, setReabriendo] = useState(false);
-
-    const ANIOS = Array.from({ length: 5 }, (_, i) => new Date().getFullYear() - 1 + i);
-    const MESES_LIST = Array.from({ length: 12 }, (_, i) => i + 1);
 
     // ── Carga principal ───────────────────────────────────────────────────────
     const cargar = useCallback(async () => {

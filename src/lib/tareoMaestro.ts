@@ -44,8 +44,13 @@ export interface TareoMaestroDetalle {
 
 /**
  * Consolida todos los tareos cerrados/obs_levantadas de analistas
- * en el Tareo Maestro del mes. Implementado en TypeScript puro
- * para evitar dependencia de la RPC de Supabase que tenía problemas.
+ * en el Tareo Maestro del mes vía RPC PostgreSQL atómica.
+ *
+ * La función SQL `consolidar_tareo_maestro` ejecuta el DELETE + INSERT
+ * dentro de una única transacción: si algo falla, Postgres hace rollback
+ * automático y el estado anterior se preserva intacto.
+ *
+ * SQL a ejecutar en Supabase: ver consolidar_tareo_maestro.sql
  */
 export async function consolidarTareoMaestro(
     anio: number,
@@ -54,128 +59,22 @@ export async function consolidarTareoMaestro(
     if (!supabase) return { ok: false, error: "Supabase no configurado." };
 
     try {
-        // ── 1. Crear o recuperar el tareo_maestro (header) ───────────────────
-        let maestroId: string;
+        const { data, error } = await supabase.rpc("consolidar_tareo_maestro", {
+            p_anio: anio,
+            p_mes:  mes,
+        });
 
-        const { data: existente } = await supabase
-            .from("tareo_maestro")
-            .select("id")
-            .eq("anio", anio)
-            .eq("mes", mes)
-            .maybeSingle();
-
-        if (existente?.id) {
-            maestroId = existente.id;
-            // Actualizar timestamp
-            await supabase
-                .from("tareo_maestro")
-                .update({ updated_at: new Date().toISOString() })
-                .eq("id", maestroId);
-        } else {
-            const { data: nuevo, error: errInsert } = await supabase
-                .from("tareo_maestro")
-                .insert({ anio, mes, estado: "abierto" })
-                .select("id")
-                .single();
-
-            if (errInsert || !nuevo?.id) {
-                console.error("[tareoMaestro] crear maestro:", errInsert?.message);
-                return { ok: false, error: errInsert?.message ?? "No se pudo crear el tareo maestro." };
-            }
-            maestroId = nuevo.id;
+        if (error) {
+            console.error("[tareoMaestro] RPC error:", error.message);
+            return { ok: false, error: error.message };
         }
 
-        // ── 2. Limpiar detalles anteriores del maestro ───────────────────────
-        const { error: errDelete } = await supabase
-            .from("tareo_maestro_detalle")
-            .delete()
-            .eq("tareo_maestro_id", maestroId);
-
-        if (errDelete) {
-            console.error("[tareoMaestro] limpiar detalles:", errDelete.message);
-            return { ok: false, error: errDelete.message };
+        if (!data?.ok) {
+            return { ok: false, error: data?.error ?? "La consolidación falló sin detalle." };
         }
 
-        // ── 3. Obtener tareos de analistas listos (cerrado u obs_levantadas) ─
-        const { data: tareos, error: errTareos } = await supabase
-            .from("tareos_analista")
-            .select("id, sede, business_unit")
-            .eq("anio", anio)
-            .eq("mes", mes)
-            .in("estado", ["cerrado", "obs_levantadas"]);
-
-        if (errTareos) {
-            console.error("[tareoMaestro] fetch tareos analista:", errTareos.message);
-            return { ok: false, error: errTareos.message };
-        }
-
-        if (!tareos || tareos.length === 0) {
-            return { ok: false, error: "No hay tareos de analistas cerrados para consolidar." };
-        }
-
-        const tareoIds = tareos.map((t) => t.id);
-        // Mapa id → {sede, business_unit}
-        const tareoMeta = new Map(tareos.map((t) => [t.id, { sede: t.sede, business_unit: t.business_unit }]));
-
-        // ── 4. Obtener todos los detalles de esos tareos ─────────────────────
-        const { data: detalles, error: errDetalles } = await supabase
-            .from("tareos_analista_detalle")
-            .select("*")
-            .in("tareo_analista_id", tareoIds);
-
-        if (errDetalles) {
-            console.error("[tareoMaestro] fetch detalles:", errDetalles.message);
-            return { ok: false, error: errDetalles.message };
-        }
-
-        if (!detalles || detalles.length === 0) {
-            // No hay detalles aún — igual marcar como concretado (tareos vacíos)
-        } else {
-            // ── 5. Insertar en tareo_maestro_detalle ─────────────────────────
-            const filas = (detalles as any[]).map((d) => {
-                const meta = tareoMeta.get(d.tareo_analista_id);
-                return {
-                    tareo_maestro_id: maestroId,
-                    empleado_id: d.empleado_id,
-                    sede: meta?.sede ?? null,
-                    business_unit: meta?.business_unit ?? null,
-                    dias_habiles: d.dias_habiles,
-                    descanso_lab: d.descanso_lab,
-                    desc_med: d.desc_med,
-                    vel: d.vel,
-                    vac: d.vac,
-                    lic_sin_h: d.lic_sin_h,
-                    susp: d.susp,
-                    aus_sin_just: d.aus_sin_just,
-                    movilidad: d.movilidad,
-                    ret_jud: d.ret_jud,
-                    origen_analista_id: d.tareo_analista_id,
-                };
-            });
-
-            const { error: errInsertDet } = await supabase
-                .from("tareo_maestro_detalle")
-                .insert(filas);
-
-            if (errInsertDet) {
-                console.error("[tareoMaestro] insertar detalles:", errInsertDet.message);
-                return { ok: false, error: errInsertDet.message };
-            }
-        }
-
-        // ── 6. Marcar el maestro como concretado ─────────────────────────────
-        const { error: errConcretar } = await supabase
-            .from("tareo_maestro")
-            .update({ estado: "concretado", updated_at: new Date().toISOString() })
-            .eq("id", maestroId);
-
-        if (errConcretar) {
-            console.error("[tareoMaestro] concretar:", errConcretar.message);
-            return { ok: false, error: errConcretar.message };
-        }
-
-        console.log(`[tareoMaestro] Concretado: ${detalles?.length ?? 0} filas → maestro ${maestroId}`);
-        return { ok: true, maestroId };
+        console.log(`[tareoMaestro] Concretado: ${data.filas} filas → maestro ${data.maestro_id}`);
+        return { ok: true, maestroId: data.maestro_id };
 
     } catch (err: any) {
         console.error("[tareoMaestro] consolidarTareoMaestro exception:", err);

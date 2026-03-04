@@ -1,16 +1,10 @@
 /**
- * Wrapper del panel del Jefe — lee sesión y aplica guard de rol.
+ * Wrapper del panel del Jefe — lee sesión desde $user store y aplica guard de rol.
  */
-import React, { useEffect, useState } from "react";
+import React, { useEffect } from "react";
+import { useStore } from "@nanostores/react";
+import { $user } from "../../lib/stores";
 import TareoJefePanel from "./TareoJefePanel";
-
-type SessionUser = {
-    id: string;
-    nombre: string;
-    sede: string;
-    business_unit: string | null;
-    rol: "jefe" | "analista";
-};
 
 type Props = {
     anioInicial: number;
@@ -18,20 +12,13 @@ type Props = {
 };
 
 export default function TareoJefeWrapper({ anioInicial, mesInicial }: Props) {
-    const [user, setUser] = useState<SessionUser | null>(null);
+    const user = useStore($user);
 
     useEffect(() => {
-        const raw = window.sessionStorage.getItem("pt_auth");
-        if (!raw) { window.location.href = "/login"; return; }
-        try {
-            const u = JSON.parse(raw) as SessionUser;
-            const isJefeOrCentral = u.rol === "jefe" || (u.rol === "analista" && u.sede === "ADM. CENTRAL");
-            if (!isJefeOrCentral) { window.location.href = "/"; return; }
-            setUser(u);
-        } catch {
-            window.location.href = "/login";
-        }
-    }, []);
+        if (!user) { window.location.href = "/login"; return; }
+        const isJefeOrCentral = user.rol === "jefe" || (user.rol === "analista" && user.sede === "ADM. CENTRAL");
+        if (!isJefeOrCentral) { window.location.href = "/"; }
+    }, [user]);
 
     if (!user) {
         return (

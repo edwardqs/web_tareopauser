@@ -4,6 +4,17 @@
 import pauserLogo from "../assets/pauser_logo.png";
 const sbUrl = import.meta.env.PUBLIC_SUPABASE_URL ?? "";
 const sbKey = import.meta.env.PUBLIC_SUPABASE_ANON_KEY ?? "";
+
+// Redirigir al dashboard si ya tiene sesión válida (server-side)
+const sessionCookie = Astro.cookies.get("pt_session");
+if (sessionCookie?.value) {
+    try {
+        const user = JSON.parse(decodeURIComponent(escape(atob(sessionCookie.value))));
+        if (user?.id && user?.rol) {
+            return Astro.redirect("/");
+        }
+    } catch { /* cookie inválida, continúa al login */ }
+}
 ---
 
 <!doctype html>
@@ -1159,6 +1170,9 @@ const sbKey = import.meta.env.PUBLIC_SUPABASE_ANON_KEY ?? "";
                     rol: data.rol,
                 };
                 sessionStorage.setItem("pt_auth", JSON.stringify(user));
+                // También fijar cookie para protección server-side (middleware)
+                const encoded = btoa(unescape(encodeURIComponent(JSON.stringify(user))));
+                document.cookie = `pt_session=${encoded}; SameSite=Strict; Path=/; Max-Age=28800`;
                 localStorage.removeItem("pt_rl");
                 return { ok: true };
             }

@@ -3,6 +3,8 @@
  * Muestra la planilla consolidada de todos los empleados (solo lectura).
  */
 import React, { useEffect, useState } from "react";
+import { useStore } from "@nanostores/react";
+import { $periodo, $user } from "../../lib/stores";
 import {
     fetchTareoMaestroLive,
     type TareoFilaLive,
@@ -23,72 +25,24 @@ import {
 import type { TareoEmployeeConfig } from "../../lib/empleados";
 import { exportarPDF, exportarExcel, construirFilas, type FilaRaw } from "../../lib/exportUtils";
 
-type SessionUser = {
-    id: string;
-    nombre: string;
-    sede?: string;
-    rol: "jefe" | "analista";
-};
-
 type VistaTab = "dias" | "ingresos" | "descuentos" | "totales";
 
 export default function TareoMaestroWrapper() {
-    const isClient = typeof window !== "undefined";
-    const searchParams = isClient ? new URLSearchParams(window.location.search) : null;
+    const { anio, mes } = useStore($periodo);
+    const user = useStore($user);
 
-    const [anio, setAnio] = useState(() => {
-        if (isClient) {
-            const raw = window.sessionStorage.getItem("pt_periodo");
-            if (raw) {
-                try {
-                    const parsed = JSON.parse(raw).anio;
-                    if (parsed && !isNaN(parsed)) return parsed;
-                } catch (e) { }
-            }
-        }
-        return searchParams?.get("anio") ? parseInt(searchParams.get("anio")!) : new Date().getFullYear();
-    });
-
-    const [mes, setMes] = useState(() => {
-        if (isClient) {
-            const raw = window.sessionStorage.getItem("pt_periodo");
-            if (raw) {
-                try {
-                    const parsed = JSON.parse(raw).mes;
-                    if (parsed && !isNaN(parsed)) return parsed;
-                } catch (e) { }
-            }
-        }
-        return searchParams?.get("mes") ? parseInt(searchParams.get("mes")!) : new Date().getMonth() + 1;
-    });
-
-    // Escuchar cambios de sessionStorage (del global selector) para actualizar vista si estamos en la ruta correcta
+    // Mantener URL sincronizada con el periodo del store
     useEffect(() => {
-        if (!isClient) return;
-        const onPeriodoChange = (e: Event) => {
-            const customEvent = e as CustomEvent;
-            const pe = customEvent.detail;
-            if (pe.anio !== anio) setAnio(pe.anio);
-            if (pe.mes !== mes) setMes(pe.mes);
-        };
-        window.addEventListener("pt:periodo-changed", onPeriodoChange);
-        return () => window.removeEventListener("pt:periodo-changed", onPeriodoChange);
-    }, [anio, mes, isClient]);
-
-    // Update URL when changed so refreshing keeps the month
-    useEffect(() => {
-        if (!isClient) return;
         const currentUrl = new URL(window.location.href);
         currentUrl.searchParams.set("anio", String(anio));
         currentUrl.searchParams.set("mes", String(mes));
         window.history.replaceState({}, "", currentUrl.toString());
-    }, [anio, mes, isClient]);
+    }, [anio, mes]);
 
     const mesLabel = `${MESES[mes]} ${anio}`;
     const ANIOS = Array.from({ length: 5 }, (_, i) => new Date().getFullYear() - 1 + i);
     const MESES_LIST = Array.from({ length: 12 }, (_, i) => i + 1);
 
-    const [authChecked, setAuthChecked] = useState(false);
     const [detalles, setDetalles] = useState<TareoFilaLive[]>([]);
     const [configMap, setConfigMap] = useState<Map<string, TareoEmployeeConfig>>(new Map());
     const [verColumnas, setVerColumnas] = useState<VistaTab>("dias");
@@ -96,18 +50,13 @@ export default function TareoMaestroWrapper() {
     const [loaded, setLoaded] = useState(false);
 
     useEffect(() => {
-        const raw = window.sessionStorage.getItem("pt_auth");
-        if (!raw) { window.location.href = "/login"; return; }
-        try {
-            const u = JSON.parse(raw) as SessionUser;
-            const isJefeOrCentral = u.rol === "jefe" || (u.rol === "analista" && u.sede === "ADM. CENTRAL");
-            if (!isJefeOrCentral) { window.location.href = "/"; return; }
-            setAuthChecked(true);
-        } catch { window.location.href = "/login"; }
-    }, []);
+        if (!user) { window.location.href = "/login"; return; }
+        const isJefeOrCentral = user.rol === "jefe" || (user.rol === "analista" && user.sede === "ADM. CENTRAL");
+        if (!isJefeOrCentral) { window.location.href = "/"; }
+    }, [user]);
 
     useEffect(() => {
-        if (!authChecked) return;
+        if (!user) return;
         async function cargar() {
             setLoaded(false);
             const datos = await fetchTareoMaestroLive(anio, mes);
@@ -130,9 +79,9 @@ export default function TareoMaestroWrapper() {
             setLoaded(true);
         }
         cargar();
-    }, [authChecked, anio, mes]);
+    }, [user, anio, mes]);
 
-    if (!authChecked) {
+    if (!user) {
         return (
             <div style={{ padding: "40px", textAlign: "center", color: "var(--color-text-muted)" }}>
                 Verificando sesión...

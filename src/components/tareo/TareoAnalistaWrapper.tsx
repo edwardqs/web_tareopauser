@@ -4,16 +4,9 @@
  * Se usa con client:only="react" para evitar SSR.
  */
 import React, { useEffect, useState } from "react";
+import { useStore } from "@nanostores/react";
+import { $periodo, $user } from "../../lib/stores";
 import TareoAnalistaGrid from "./TareoAnalistaGrid";
-
-type SessionUser = {
-    id: string;
-    nombre: string;
-    position: string;
-    sede: string;
-    business_unit: string | null;
-    rol: "jefe" | "analista";
-};
 
 type Props = {
     anio?: number;
@@ -25,66 +18,40 @@ type Props = {
 };
 
 export default function TareoAnalistaWrapper({ anio, mes, mesLabel, tareoAnalistaId, readonly }: Props) {
-    // Si no vienen props (ej: llamado desde página estática), leer de la URL
+    const { anio: storeAnio, mes: storeMes } = useStore($periodo);
+    const user = useStore($user);
+
     const isClient = typeof window !== "undefined";
     const searchParams = isClient ? new URLSearchParams(window.location.search) : null;
-
     const finalId = tareoAnalistaId || (searchParams?.get("id") ?? undefined);
 
     const currentAnio = new Date().getFullYear();
-    const currentMes = new Date().getMonth() + 1;
+    const currentMes  = new Date().getMonth() + 1;
 
-    // Leer periodo global de sessionStorage si existe
-    let sessionAnio = currentAnio;
-    let sessionMes = currentMes;
-    if (isClient) {
-        const raw = window.sessionStorage.getItem("pt_periodo");
-        if (raw) {
-            try {
-                const pe = JSON.parse(raw);
-                if (pe.anio) sessionAnio = pe.anio;
-                if (pe.mes) sessionMes = pe.mes;
-            } catch (e) { }
-        }
-    }
-
-    // Si es vista del Jefe (finalId existe), tomar anio/mes de URL o props. Si es analista, usar global.
+    // Si es vista del Jefe (finalId existe), tomar anio/mes de URL o props; si no, usar store global.
     const finalAnio = finalId
         ? (anio ?? (searchParams?.get("anio") ? parseInt(searchParams.get("anio")!) : currentAnio))
-        : sessionAnio;
+        : storeAnio;
     const finalMes = finalId
         ? (mes ?? (searchParams?.get("mes") ? parseInt(searchParams.get("mes")!) : currentMes))
-        : sessionMes;
+        : storeMes;
     const finalMesLabel = mesLabel ?? (isClient ? "Tareo seleccionado" : "");
-    const [user, setUser] = useState<SessionUser | null>(null);
+
     const [error, setError] = useState<string | null>(null);
 
     useEffect(() => {
-        const raw = window.sessionStorage.getItem("pt_auth");
-        if (!raw) {
+        if (!user) {
             window.location.href = "/login";
             return;
         }
-        try {
-            const u = JSON.parse(raw) as SessionUser;
-            // Guard: si es jefe y no trae el ID desde la URL o props → redirigir
-            const isJefeOrCentral = u.rol === "jefe" || (u.rol === "analista" && u.sede === "ADM. CENTRAL");
-            if (isJefeOrCentral && !finalId && u.rol === "jefe") {
-                window.location.href = "/";
-                return;
-            }
-            setUser(u);
-        } catch {
-            setError("Error al leer la sesión. Por favor, vuelve a iniciar sesión.");
+        // Guard: si es jefe puro y no trae el ID desde la URL o props → redirigir
+        if (user.rol === "jefe" && !finalId) {
+            window.location.href = "/";
         }
-    }, [finalId]);
+    }, [user, finalId]);
 
     if (error) {
-        return (
-            <div style={{ padding: "20px", color: "var(--color-danger)" }}>
-                ⚠️ {error}
-            </div>
-        );
+        return <div style={{ padding: "20px", color: "var(--color-danger)" }}>⚠️ {error}</div>;
     }
 
     if (!user) {

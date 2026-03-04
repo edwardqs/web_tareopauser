@@ -19,6 +19,17 @@
 import { verifyTareoLogin } from "./supabase";
 
 export const SESSION_KEY = "pt_auth";
+export const SESSION_COOKIE = "pt_session";
+
+// ─── Cookie helpers (cliente) ──────────────────────────────────────────────────
+
+/** Escribe la cookie de sesión para protección server-side (middleware) */
+function setSessionCookie(user: SessionUser): void {
+    if (typeof document === "undefined") return;
+    const encoded = btoa(unescape(encodeURIComponent(JSON.stringify(user))));
+    // 8 horas — equivale a una jornada laboral
+    document.cookie = `${SESSION_COOKIE}=${encoded}; SameSite=Strict; Path=/; Max-Age=28800`;
+}
 
 // ─── Rate limiting ────────────────────────────────────────────────────────────
 
@@ -131,6 +142,7 @@ export async function login(
     };
 
     sessionStorage.setItem(SESSION_KEY, JSON.stringify(sessionUser));
+    setSessionCookie(sessionUser);
     resetRateLimit();
     return { ok: true };
 }
@@ -154,6 +166,12 @@ export function getSessionUser(): SessionUser | null {
 }
 
 export function logout(): void {
+    // Limpiar sessionStorage primero
     sessionStorage.removeItem(SESSION_KEY);
-    window.location.href = "/login";
+    sessionStorage.removeItem("pt_periodo");
+    // Navegar al endpoint server-side que borra la cookie via Set-Cookie header.
+    // NO usar clearSessionCookie() aquí: el borrado client-side llega tarde y
+    // el siguiente request (a /login) todavía lleva la cookie, causando el bucle:
+    // 302 /login → 200 / → redirect a /login → ...
+    window.location.href = "/api/logout";
 }
