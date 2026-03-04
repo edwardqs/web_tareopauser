@@ -2,6 +2,7 @@ import React, { useState, useRef } from "react";
 import * as ExcelJS from "exceljs";
 import { supabase } from "../../lib/supabase";
 import { upsertDetallesLote, fetchDetallesAnalista, type TareoAnalistaDetalle } from "../../lib/tareoAnalista";
+import { buildColumnMap, getColValue } from "../../lib/columnDetector";
 
 interface Props {
     tareoAnalistaId: string;
@@ -9,10 +10,10 @@ interface Props {
 }
 
 interface FilaValidada {
-    idLocal: number; // Para key en react
+    idLocal: number;
     numeroFilaExcel: number;
     dni: string;
-    empleadoId?: string; // Solo si se encontró
+    empleadoId?: string;
     nombreEmpleado?: string;
     diasTrabajados: number;
     comisiones: number;
@@ -47,14 +48,31 @@ export default function ImportadorHistoricoAvanzado({ tareoAnalistaId, onImportC
             // Búsqueda de hoja
             let worksheet = workbook.getWorksheet("2601");
             if (!worksheet) {
-                worksheet = workbook.worksheets[0]; // Fallback a la primera hoja
+                worksheet = workbook.worksheets[0];
             }
-
             if (!worksheet) {
                 throw new Error("No se encontró ninguna hoja válida en el Excel.");
             }
 
+            // ── Detección dinámica de columnas ──────────────────────────────
+            const { columnMap, headerRowIndex, unmapped, unknown } = buildColumnMap(worksheet);
+
+            if (unmapped.length > 0) {
+                console.warn("[Importador] Campos sin columna detectada:", unmapped);
+            }
+            if (unknown.length > 0) {
+                console.warn("[Importador] Cabeceras no reconocidas:", unknown);
+            }
+
+            // Validar campos mínimos obligatorios
+            const obligatorios = ["DNI", "DIAS_TRABAJADOS"] as const;
+            const faltantes = obligatorios.filter(k => columnMap[k] == null);
+            if (faltantes.length > 0) {
+                throw new Error(`El Excel no contiene las columnas requeridas: ${faltantes.join(", ")}`);
+            }
+
             if (!supabase) throw new Error("Supabase no está configurado.");
+
             // 2. Traer todos los empleados de Supabase para el cruce
             const { data: empleadosBd, error: errorEmp } = await supabase
                 .from("employees")
@@ -69,57 +87,53 @@ export default function ImportadorHistoricoAvanzado({ tareoAnalistaId, onImportC
                 if (emp.dni) mapEmpleados.set(emp.dni.trim(), { id: emp.id, nombre: emp.full_name });
             });
 
-            // 3. Procesar las filas del Excel
+            // 3. Helpers de conversión
+            const asString = (val: unknown): string => {
+                if (val === null || val === undefined) return "";
+                if (typeof val === 'object' && 'result' in (val as any)) {
+                    return String((val as any).result).trim();
+                }
+                return String(val).trim();
+            };
+
+            const parseNum = (val: unknown): number => {
+                if (val === null || val === undefined) return 0;
+                if (typeof val === 'number') return val;
+                if (typeof val === 'object' && 'result' in (val as any)) {
+                    return parseNum((val as any).result);
+                }
+                const parsed = parseFloat(String(val).replace(/,/g, ''));
+                return isNaN(parsed) ? 0 : parsed;
+            };
+
+            // 4. Procesar las filas del Excel
             const filasProcesadas: FilaValidada[] = [];
             let idCounter = 1;
 
-            // Iterar a partir de la fila 15 (índices 1-based en exceljs, por lo tanto fila 15)
-            // Las cabeceras estaban en la 14.
-            worksheet.eachRow((row, rowNumber) => {
-                if (rowNumber < 15) return; // Saltar cabeceras y títulos
+            for (let rowNumber = headerRowIndex + 1; rowNumber <= worksheet.rowCount; rowNumber++) {
+                const row = worksheet.getRow(rowNumber);
 
-                // Leer valores (cuidado con diferencias de 1-based / 0-based index)
-                // Según nuestro analisis, DNI estaba en col 3 (0-based) = columna D (exceljs = 4)
-                // Usaremos números de columna 1-based para exceljs
-                const asString = (val: ExcelJS.CellValue) => {
-                    if (val === null || val === undefined) return "";
-                    // Si es una fórmula, exceljs devuelve un objeto con { result }
-                    if (typeof val === 'object' && val !== null && 'result' in val) {
-                        return String((val as any).result).trim();
-                    }
-                    return String(val).trim();
-                };
+                // Leer DNI dinámicamente
+                const dni = asString(getColValue(row, columnMap, "DNI"));
+                if (!dni) continue;
 
-                const parseNum = (val: ExcelJS.CellValue) => {
-                    if (val === null || val === undefined) return 0;
-                    if (typeof val === 'number') return val;
-                    // Si es una fórmula, extraer el valor resultante
-                    if (typeof val === 'object' && val !== null && 'result' in val) {
-                        return parseNum((val as any).result);
-                    }
-                    const parsed = parseFloat(String(val).replace(/,/g, ''));
-                    return isNaN(parsed) ? 0 : parsed;
-                };
+                // Saltar filas de totales
+                const nombre = asString(getColValue(row, columnMap, "NOMBRE"));
+                if (/^(total|subtotal)/i.test(nombre)) continue;
 
-                // Índices 1-based de exceljs: (0-based + 1)
-                const dni = asString(row.getCell(4).value); // D 
-                if (!dni) return; // Fila vacía
-
-                const diasTrabajados = parseNum(row.getCell(13).value); // M
-                const comisiones = parseNum(row.getCell(42).value);     // AP
-                const bonoProductividad = parseNum(row.getCell(77).value); // BY
-                const bonoAlimentacion = parseNum(row.getCell(107).value); // DA
+                const diasTrabajados = parseNum(getColValue(row, columnMap, "DIAS_TRABAJADOS"));
+                const comisiones = parseNum(getColValue(row, columnMap, "COMISIONES"));
+                const bonoProductividad = parseNum(getColValue(row, columnMap, "BONO_PRODUCT"));
+                const bonoAlimentacion = parseNum(getColValue(row, columnMap, "BONO_ALIMENT"));
 
                 let matchBd = mapEmpleados.get(dni);
                 let dniFinal = dni;
 
-                // Si no lo encuentra directo y es solo números pero menor a 8 dígitos, Excel puede haberle quitado los ceros iniciales
+                // Recuperar ceros iniciales que Excel puede haber eliminado
                 if (!matchBd && /^\d+$/.test(dni) && dni.length < 8) {
                     const paddedDni = dni.padStart(8, '0');
                     matchBd = mapEmpleados.get(paddedDni);
-                    if (matchBd) {
-                        dniFinal = paddedDni;
-                    }
+                    if (matchBd) dniFinal = paddedDni;
                 }
 
                 filasProcesadas.push({
@@ -135,14 +149,11 @@ export default function ImportadorHistoricoAvanzado({ tareoAnalistaId, onImportC
                     esValido: !!matchBd,
                     observacion: matchBd ? undefined : "DNI no encontrado en la base de datos",
                 });
-            });
+            }
 
-            // 4. Separar válidos y observados
-            const validos = filasProcesadas.filter(f => f.esValido);
-            const observados = filasProcesadas.filter(f => !f.esValido);
-
-            setRegistrosValidos(validos);
-            setRegistrosObservados(observados);
+            // 5. Separar válidos y observados
+            setRegistrosValidos(filasProcesadas.filter(f => f.esValido));
+            setRegistrosObservados(filasProcesadas.filter(f => !f.esValido));
             setStatus("preview");
             setMessage("Análisis completado. Revisa los resultados antes de confirmar.");
 
@@ -151,7 +162,7 @@ export default function ImportadorHistoricoAvanzado({ tareoAnalistaId, onImportC
             setStatus("error");
             setMessage(error.message || "Error desconocido al procesar el archivo.");
         } finally {
-            if (fileInputRef.current) fileInputRef.current.value = ""; // Limpiar input
+            if (fileInputRef.current) fileInputRef.current.value = "";
         }
     };
 
@@ -161,19 +172,16 @@ export default function ImportadorHistoricoAvanzado({ tareoAnalistaId, onImportC
         setMessage("Guardando en base de datos...");
 
         try {
-            // Obtenemos los detalles actuales para no sobreescribir con 0 otros datos ya ingresados manualmente
             const detallesActuales = await fetchDetallesAnalista(tareoAnalistaId);
             const mapActuales = new Map(detallesActuales.map(d => [d.empleado_id, d]));
 
-            // 1. Guardar los registros VÁLIDOS en tareos_analista_detalle
             if (registrosValidos.length > 0) {
                 const detalles: TareoAnalistaDetalle[] = registrosValidos.map(reg => {
                     const actual = mapActuales.get(reg.empleadoId!);
                     return {
                         tareo_analista_id: tareoAnalistaId,
-                        empleado_id: reg.empleadoId!, // Seguro porque esValido es true
+                        empleado_id: reg.empleadoId!,
                         dias_habiles: reg.diasTrabajados,
-                        // Preservamos el resto, o lo dejamos en 0 si es la primera vez
                         descanso_lab: actual?.descanso_lab ?? 0,
                         desc_med: actual?.desc_med ?? 0,
                         vel: actual?.vel ?? 0,
@@ -193,7 +201,6 @@ export default function ImportadorHistoricoAvanzado({ tareoAnalistaId, onImportC
                 if (!ok) throw new Error("Fallo al insertar detalles válidos: " + error);
             }
 
-            // 2. Insertar Observaciones (requiere que exista la tabla observaciones_importacion)
             if (registrosObservados.length > 0) {
                 const obsAInsertar = registrosObservados.map(obs => ({
                     tareo_analista_id: tareoAnalistaId,
@@ -208,15 +215,11 @@ export default function ImportadorHistoricoAvanzado({ tareoAnalistaId, onImportC
                     estado: "Pendiente"
                 }));
 
-                // Comentado para evitar crasheo si la tabla aún no se ha creado con la migración.
-                // Una vez que ejecutes el SQL para crear `observaciones_importacion`, puedes descomentar esto.
-
                 if (!supabase) throw new Error("Supabase null");
                 const { error: obsError } = await supabase
                     .from("observaciones_importacion")
                     .insert(obsAInsertar);
                 if (obsError) console.warn("Advertencia al guardar observaciones (¿existe la tabla?):", obsError);
-
             }
 
             setStatus("success");
