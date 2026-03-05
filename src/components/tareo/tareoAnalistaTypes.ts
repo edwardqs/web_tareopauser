@@ -38,8 +38,8 @@ export function calcularFila(emp: EmpleadoFila) {
     const afp = config?.afp_codigo ?? "ONP";
     const tieneVidaLey = config?.vida_ley ?? false;
 
-    const diasTrab = calcDiasTrab(d.dias_habiles, d.vac, d.lic_sin_h, d.susp, d.aus_sin_just);
-    const totalHoras = calcTotalHoras(d.dias_habiles, d.descanso_lab, d.desc_med, d.vel, d.vac, d.lic_sin_h, d.susp, d.aus_sin_just, 0);
+    const diasTrab = calcDiasTrab(d.dias_habiles, d.lic_sin_h, d.desc_med, d.susp, d.vac, d.aus_sin_just);
+    const totalHoras = calcTotalHoras(d.dias_habiles, d.descanso_lab, 0, d.susp, d.lic_sin_h, d.desc_med, d.aus_sin_just, d.vel, d.vac, 0);
     const sueldoProp = calcSueldoProporcional(sueldoBase, diasTrab, 30);
     const totalAfecto = round2(sueldoProp + (d.comision || 0) + (d.bono_productiv || 0));
     const totalNoAfecto = round2((d.movilidad || 0) + (d.bono_alimento || 0));

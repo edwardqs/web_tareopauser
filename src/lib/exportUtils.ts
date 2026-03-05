@@ -63,7 +63,7 @@ export interface FilaRaw {
 
 export function construirFilas(rawFilas: FilaRaw[]): FilaPlanilla[] {
     return rawFilas.map((r, idx) => {
-        const diasTrab = calcDiasTrab(r.diasHabiles, r.vac, r.licSinH, r.susp, r.ausSinJust);
+        const diasTrab = calcDiasTrab(r.diasHabiles, r.licSinH, 0, r.susp, r.vac, r.ausSinJust);
         const sueldoProp = calcSueldoProporcional(r.sueldoBase, diasTrab, 30);
         const totalAfecto = round2(sueldoProp + (r.comision || 0) + (r.bonoProductiv || 0));
         const totalNoAfecto = round2((r.movilidad || 0) + (r.bonoAlimento || 0));

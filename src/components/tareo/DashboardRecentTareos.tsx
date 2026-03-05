@@ -63,7 +63,7 @@ export default function DashboardRecentTareos({ anioActual }: { anioActual: numb
                     const afp = config?.afp_codigo ?? "ONP";
                     const tieneVidaLey = config?.vida_ley ?? false;
 
-                    const diasTrab = calcDiasTrab(d.dias_habiles, d.vac, d.lic_sin_h, d.susp, d.aus_sin_just);
+                    const diasTrab = calcDiasTrab(d.dias_habiles, d.lic_sin_h, d.desc_med, d.susp, d.vac, d.aus_sin_just);
                     const sueldoProp = calcSueldoProporcional(sueldoBase, diasTrab, 30);
                     const totalAfecto = round2(sueldoProp);
                     const totalNoAfecto = round2(d.movilidad);

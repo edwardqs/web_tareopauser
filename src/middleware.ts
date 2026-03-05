@@ -9,9 +9,10 @@
  * accediendo directamente a la URL.
  */
 import { defineMiddleware } from "astro:middleware";
+import { verifySession } from "./lib/session";
 
 /** Rutas que NO requieren autenticación */
-const PUBLIC_PATHS = ["/login"];
+const PUBLIC_PATHS = ["/login", "/api/login", "/api/logout"];
 
 export const onRequest = defineMiddleware(async (context, next) => {
     const { pathname } = context.url;
@@ -31,17 +32,16 @@ export const onRequest = defineMiddleware(async (context, next) => {
         return context.redirect("/login");
     }
 
-    try {
-        const decoded = decodeURIComponent(escape(atob(sessionCookie.value)));
-        const user = JSON.parse(decoded);
-        if (!user?.id || !user?.rol) {
-            return context.redirect("/login");
-        }
-    } catch {
-        // Cookie malformada — forzar re-login
+    const user = verifySession(sessionCookie.value);
+    
+    if (!user || !user.id || !user.rol) {
+        // Cookie malformada o firma inválida — forzar re-login
         context.cookies.delete("pt_session", { path: "/" });
         return context.redirect("/login");
     }
+
+    // Opcional: inyectar usuario en locals para acceso fácil en endpoints/páginas
+    context.locals.user = user;
 
     return next();
 });

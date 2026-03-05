@@ -9,6 +9,27 @@ export const supabase =
         ? createClient(supabaseUrl, supabaseKey)
         : null;
 
+/**
+ * Configura el token JWT (Bearer) en el cliente Supabase.
+ * Esto habilita RLS usando el token generado en el servidor.
+ */
+export async function setSupabaseToken(token: string) {
+    if (!supabase) return;
+    
+    // Configura la sesión usando el token como access_token
+    // Supabase Auth usará este token para todas las peticiones
+    const { error } = await supabase.auth.setSession({
+        access_token: token,
+        refresh_token: "", // No tenemos refresh token real, pero setSession lo requiere
+    });
+    
+    if (error) {
+        console.warn("[Supabase] Error al setear sesión:", error.message);
+    } else {
+        console.log("[Supabase] Sesión configurada con token JWT custom");
+    }
+}
+
 // ─── Auth helper ──────────────────────────────────────────────────────────────
 
 export interface TareoLoginResult {

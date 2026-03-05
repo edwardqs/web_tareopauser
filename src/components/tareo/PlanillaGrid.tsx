@@ -69,8 +69,8 @@ const EMPLEADOS_DEMO: EmpleadoRow[] = [
 
 // ─── Calcular totales por fila ────────────────────────────────────────────────
 function calcularFila(e: EmpleadoRow): FilaCalculada {
-    const diasTrab = calcDiasTrab(e.diasHabiles, e.vac, e.licSinH, e.susp, e.ausSinJust);
-    const totalHoras = calcTotalHoras(e.diasHabiles, e.descansoLab, e.descMed, e.vel, e.vac, e.licSinH, e.susp, e.ausSinJust, 0);
+    const diasTrab = calcDiasTrab(e.diasHabiles, e.licSinH, e.descMed, e.susp, e.vac, e.ausSinJust);
+    const totalHoras = calcTotalHoras(e.diasHabiles, e.descansoLab, 0, e.susp, e.licSinH, e.descMed, e.ausSinJust, e.vel, e.vac, 0);
     const sueldoProp = calcSueldoProporcional(e.sueldoBase, diasTrab, 30);
     const totalAfecto = round2(sueldoProp);
     const totalNoAfecto = round2(e.movilidad);

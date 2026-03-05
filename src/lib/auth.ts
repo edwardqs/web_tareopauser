@@ -1,23 +1,11 @@
-import { verifyTareoLogin } from "./supabase";
+// import { verifyTareoLogin } from "./supabase";
 
 export const SESSION_KEY = "pt_auth";
 export const SESSION_COOKIE = "pt_session";
 
 // ─── Cookie helpers (cliente) ──────────────────────────────────────────────────
 
-function setSessionCookie(user: SessionUser) {
-    if (typeof document === "undefined") return;
-    // Guardar cookie para middleware (server-side protection)
-    // codificamos doble para evitar problemas con caracteres especiales en JSON
-    const val = btoa(unescape(encodeURIComponent(JSON.stringify(user))));
-    // 1 día de duración
-    document.cookie = `${SESSION_COOKIE}=${val}; path=/; max-age=86400; SameSite=Strict`;
-}
-
-function clearSessionCookie() {
-    if (typeof document === "undefined") return;
-    document.cookie = `${SESSION_COOKIE}=; path=/; max-age=0; SameSite=Strict`;
-}
+// (Funciones setSessionCookie y clearSessionCookie eliminadas ya que la cookie es HTTP-only y manejada server-side)
 
 // ─── Rate Limiting (localStorage) ──────────────────────────────────────────────
 
@@ -67,6 +55,7 @@ export interface SessionUser {
     sede: string;
     business_unit: string | null;
     rol: "jefe" | "analista";
+    token?: string;
 }
 
 // ─── Login principal ───────────────────────────────────────────────────────────
@@ -90,65 +79,50 @@ export async function login(
         return { ok: false, error: "Ingresa tu DNI y contraseña." };
     }
 
-    // 3. Llamada a Supabase RPC
-    const result = await verifyTareoLogin(dni, password);
+    try {
+        // 3. Llamada al endpoint API server-side (Set-Cookie seguro)
+        const res = await fetch("/api/login", {
+            method: "POST",
+            headers: { "Content-Type": "application/json" },
+            body: JSON.stringify({ dni, password }),
+        });
 
-    if (!result.ok) {
-        registerFailedAttempt();
-        // Siempre el mismo mensaje genérico para no dar pistas
-        return {
-            ok: false,
-            error: "Credenciales incorrectas o sin acceso autorizado.",
-            blockedMs: getBlockedMs(),
+        const data = await res.json();
+
+        if (!res.ok) {
+            registerFailedAttempt();
+            return {
+                ok: false,
+                error: data.error || "Credenciales incorrectas o sin acceso autorizado.",
+                blockedMs: getBlockedMs(),
+            };
+        }
+
+        // 4. Login exitoso
+        // La cookie HTTP-only ya fue seteada por el servidor.
+        // Guardamos sessionUser en sessionStorage solo para la UI.
+        const sessionUser: SessionUser = {
+            ...data.user,
+            token: data.token // Guardamos el token JWT de Supabase para RLS
         };
+
+        console.log("[Auth] Login exitoso:", sessionUser);
+
+        sessionStorage.setItem(SESSION_KEY, JSON.stringify(sessionUser));
+        
+        // Configurar el token en el cliente Supabase (si existe función helper)
+        if (data.token) {
+            import("./supabase").then(({ setSupabaseToken }) => {
+                setSupabaseToken(data.token);
+            });
+        }
+
+        resetRateLimit();
+        return { ok: true };
+    } catch (e) {
+        console.error("[Auth] Login error:", e);
+        return { ok: false, error: "Error de conexión." };
     }
-
-    // 4. Login exitoso — guardar sesión sin contraseña
-    // Derivamos el rol desde el cargo (position) para no depender
-    // de que la RPC devuelva exactamente "jefe"/"analista".
-    const position = (result.position ?? "").toUpperCase();
-    const rolDerived: "jefe" | "analista" = position.includes("JEFE")
-        ? "jefe"
-        : "analista";
-
-    // Debugging para el usuario (se verá en la consola del navegador)
-    console.log("[Auth] Login exitoso. Datos recibidos:", {
-        nombre: result.nombre,
-        position: result.position,
-        rol_db: result.rol,
-        rol_derivado: rolDerived
-    });
-
-    // También aceptamos si la RPC ya devuelve el rol correcto,
-    // PERO si el cargo dice JEFE, le damos prioridad (auto-promotion)
-    // para corregir casos donde la BD tenga "analista" por defecto.
-    let rolFinal: "jefe" | "analista" = "analista";
-
-    if (result.rol === "jefe") {
-        rolFinal = "jefe";
-    } else if (rolDerived === "jefe") {
-        rolFinal = "jefe";
-    } else if (result.rol === "analista") {
-        rolFinal = "analista";
-    } else {
-        rolFinal = rolDerived;
-    }
-
-    console.log("[Auth] Rol final asignado:", rolFinal);
-
-    const sessionUser: SessionUser = {
-        id: result.id!,
-        nombre: result.nombre!,
-        position: result.position!,
-        sede: result.sede!,
-        business_unit: result.business_unit ?? null,
-        rol: rolFinal,
-    };
-
-    sessionStorage.setItem(SESSION_KEY, JSON.stringify(sessionUser));
-    setSessionCookie(sessionUser);
-    resetRateLimit();
-    return { ok: true };
 }
 
 // ─── Helpers de sesión ────────────────────────────────────────────────────────

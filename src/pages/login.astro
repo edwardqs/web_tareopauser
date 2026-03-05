@@ -1162,15 +1162,7 @@ if (sessionCookie?.value) {
                         blockedMs: Math.max(0, st.blockedUntil - Date.now()),
                     };
                 }
-                const position = (data.position || "").toUpperCase();
-                const rolDerived = position.includes("JEFE") ? "jefe" : "analista";
-                
-                // Prioridad a la posición "JEFE" sobre "analista" en BD
-                let rolFinal = "analista";
-                if (data.rol === "jefe") rolFinal = "jefe";
-                else if (rolDerived === "jefe") rolFinal = "jefe";
-                else if (data.rol === "analista") rolFinal = "analista";
-                else rolFinal = rolDerived;
+                const rolFinal = (data.rol === "jefe" || data.rol === "analista") ? data.rol : "analista";
 
                 const user = {
                     id: data.id,

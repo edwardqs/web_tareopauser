@@ -244,20 +244,50 @@ const currentPath = Astro.url.pathname;
 				// Mostrar usuario en topbar
 				var userEl = document.getElementById("topbarUser");
 				if (userEl && user.nombre) {
-					userEl.innerHTML =
-						'<div style="display:flex;align-items:center;gap:8px;">' +
-						'<div style="width:28px;height:28px;border-radius:50%;background:rgba(79,142,247,0.2);border:1px solid rgba(79,142,247,0.4);display:flex;align-items:center;justify-content:center;font-size:11px;font-weight:700;color:var(--color-primary);">' +
-						user.nombre.charAt(0).toUpperCase() +
-						"</div>" +
-						"<div>" +
-						'<div style="font-size:12px;font-weight:600;color:var(--color-text)">' +
-						user.nombre.split(" ")[0] +
-						"</div>" +
-						'<div style="font-size:10px;color:var(--color-text-muted)">' +
-						(user.sede || "") +
-						(user.business_unit ? " / " + user.business_unit : "") +
-						"</div>" +
-						"</div></div>";
+					// Limpiar contenido previo
+					userEl.textContent = "";
+
+					// Contenedor principal
+					var container = document.createElement("div");
+					container.style.display = "flex";
+					container.style.alignItems = "center";
+					container.style.gap = "8px";
+
+					// Avatar (Inicial)
+					var avatar = document.createElement("div");
+					avatar.style.width = "28px";
+					avatar.style.height = "28px";
+					avatar.style.borderRadius = "50%";
+					avatar.style.background = "rgba(79,142,247,0.2)";
+					avatar.style.border = "1px solid rgba(79,142,247,0.4)";
+					avatar.style.display = "flex";
+					avatar.style.alignItems = "center";
+					avatar.style.justifyContent = "center";
+					avatar.style.fontSize = "11px";
+					avatar.style.fontWeight = "700";
+					avatar.style.color = "var(--color-primary)";
+					avatar.textContent = user.nombre.charAt(0).toUpperCase();
+
+					// Info texto
+					var infoDiv = document.createElement("div");
+
+					var nameDiv = document.createElement("div");
+					nameDiv.style.fontSize = "12px";
+					nameDiv.style.fontWeight = "600";
+					nameDiv.style.color = "var(--color-text)";
+					nameDiv.textContent = user.nombre.split(" ")[0];
+
+					var metaDiv = document.createElement("div");
+					metaDiv.style.fontSize = "10px";
+					metaDiv.style.color = "var(--color-text-muted)";
+					metaDiv.textContent = (user.sede || "") + (user.business_unit ? " / " + user.business_unit : "");
+
+					infoDiv.appendChild(nameDiv);
+					infoDiv.appendChild(metaDiv);
+
+					container.appendChild(avatar);
+					container.appendChild(infoDiv);
+					userEl.appendChild(container);
 				}
 
 				// Construir sidebar según rol
@@ -503,6 +533,22 @@ const currentPath = Astro.url.pathname;
 			})();
 		</script>
 
+		<!-- ── Restaurar sesión en cliente Supabase (RLS) ── -->
+		<script>
+			import { setSupabaseToken } from "../lib/supabase";
+			const raw = sessionStorage.getItem("pt_auth");
+			if (raw) {
+				try {
+					const user = JSON.parse(raw);
+					if (user.token) {
+						setSupabaseToken(user.token);
+					}
+				} catch (e) {
+					console.error("Error restaurando sesión Supabase:", e);
+				}
+			}
+		</script>
+
 		<!-- ── Badge de empleados sin config tareo (JEFE) + Badge obs (ANALISTA) ── -->
 		<script type="module">
 			async function actualizarBadge() {
@@ -518,9 +564,12 @@ const currentPath = Astro.url.pathname;
 				if (!raw) return;
 				try {
 					var user = JSON.parse(raw);
+                    // Si tenemos token en la sesión, usarlo. Si no, usar la clave anon (solo lectura pública si RLS permite anon)
+                    var authHeader = user.token ? "Bearer " + user.token : "Bearer " + sbKey;
+                    
 					var headers = {
 						apikey: sbKey,
-						Authorization: "Bearer " + sbKey,
+						Authorization: authHeader,
 						Prefer: "count=exact",
 						Range: "0-0",
 					};
