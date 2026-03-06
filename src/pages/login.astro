@@ -2,11 +2,12 @@
 // login.astro — Página de acceso PAUSER TAREO
 // Sin Layout (pantalla completa propia)
 import pauserLogo from "../assets/pauser_logo.png";
+import { verifySession } from "../lib/session";
+
 const sbUrl = import.meta.env.PUBLIC_SUPABASE_URL ?? "";
 const sbKey = import.meta.env.PUBLIC_SUPABASE_ANON_KEY ?? "";
 
 // Redirigir al dashboard si ya tiene sesión válida (server-side)
-import { verifySession } from "../lib/session";
 const sessionCookie = Astro.cookies.get("pt_session");
 if (sessionCookie?.value) {
     const sessionUser = verifySession(sessionCookie.value);
@@ -35,7 +36,6 @@ if (sessionCookie?.value) {
             rel="stylesheet"
         />
         <style>
-            /* ── Reset mínimo ── */
             *,
             *::before,
             *::after {
