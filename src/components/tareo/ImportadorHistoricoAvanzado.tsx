@@ -180,8 +180,23 @@ export default function ImportadorHistoricoAvanzado({ tareoAnalistaId, onImportC
                 });
             }
 
-            setRegistrosValidos(filasProcesadas.filter(f => f.esValido));
-            setRegistrosObservados(filasProcesadas.filter(f => !f.esValido));
+            const validos = filasProcesadas.filter(f => f.esValido);
+            const observados = filasProcesadas.filter(f => !f.esValido);
+
+            console.log(`[Importador] Total procesadas: ${filasProcesadas.length} | Válidas: ${validos.length} | Con error: ${observados.length}`);
+            if (observados.length > 0) {
+                console.warn(`[Importador] ⚠️ ${observados.length} filas con errores de validación:`);
+                console.table(observados.map(f => ({
+                    "Fila Excel": f.numeroFilaExcel,
+                    "DNI leído": f.dni,
+                    "Motivo": f.observacion ?? "desconocido",
+                    "Días": f.diasTrabajados,
+                    "Sueldo": f.sueldoBase,
+                })));
+            }
+
+            setRegistrosValidos(validos);
+            setRegistrosObservados(observados);
             setStatus("preview");
             setMessage("Análisis completado. Revisa los resultados antes de confirmar.");
 

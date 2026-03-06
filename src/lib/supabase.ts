@@ -4,30 +4,31 @@ import { createClient } from "@supabase/supabase-js";
 const supabaseUrl = import.meta.env.PUBLIC_SUPABASE_URL ?? "";
 const supabaseKey = import.meta.env.PUBLIC_SUPABASE_ANON_KEY ?? "";
 
+// Token del usuario autenticado — se actualiza tras el login
+let _authToken: string | null = null;
+
+// Inyecta el JWT del usuario en cada request para habilitar RLS.
+// Cuando no hay token usa el anon key (comportamiento por defecto de Supabase).
+function authedFetch(url: RequestInfo | URL, options: RequestInit = {}): Promise<Response> {
+    if (!_authToken) return fetch(url, options);
+    const headers = new Headers(options.headers);
+    headers.set("Authorization", `Bearer ${_authToken}`);
+    return fetch(url, { ...options, headers });
+}
+
 export const supabase =
     supabaseUrl && supabaseKey
-        ? createClient(supabaseUrl, supabaseKey)
+        ? createClient(supabaseUrl, supabaseKey, {
+              global: { fetch: authedFetch },
+          })
         : null;
 
 /**
- * Configura el token JWT (Bearer) en el cliente Supabase.
- * Esto habilita RLS usando el token generado en el servidor.
+ * Configura el JWT del usuario para habilitar RLS en queries cliente.
+ * El JWT debe estar firmado con SUPABASE_JWT_SECRET del Dashboard.
  */
-export async function setSupabaseToken(token: string) {
-    if (!supabase) return;
-    
-    // Configura la sesión usando el token como access_token
-    // Supabase Auth usará este token para todas las peticiones
-    const { error } = await supabase.auth.setSession({
-        access_token: token,
-        refresh_token: "", // No tenemos refresh token real, pero setSession lo requiere
-    });
-    
-    if (error) {
-        console.warn("[Supabase] Error al setear sesión:", error.message);
-    } else {
-        console.log("[Supabase] Sesión configurada con token JWT custom");
-    }
+export function setSupabaseToken(token: string) {
+    _authToken = token;
 }
 
 // ─── Auth helper ──────────────────────────────────────────────────────────────
